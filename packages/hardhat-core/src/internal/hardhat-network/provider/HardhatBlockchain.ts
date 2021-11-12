@@ -24,11 +24,12 @@ export class HardhatBlockchain implements HardhatBlockchainInterface {
   public async getBlock(
     blockHashOrNumber: Buffer | BN | number
   ): Promise<Block | null> {
-    if (typeof blockHashOrNumber === "number") {
-      return this._data.getBlockByNumber(new BN(blockHashOrNumber)) ?? null;
-    }
-    if (BN.isBN(blockHashOrNumber)) {
-      return this._data.getBlockByNumber(blockHashOrNumber) ?? null;
+    if (typeof blockHashOrNumber === "number" || BN.isBN(blockHashOrNumber)) {
+      const blockNumber =
+        typeof blockHashOrNumber === "number"
+          ? new BN(blockHashOrNumber)
+          : blockHashOrNumber;
+      return this._data.getBlockByNumber(blockNumber) ?? null;
     }
     return this._data.getBlockByHash(blockHashOrNumber) ?? null;
   }
@@ -42,7 +43,13 @@ export class HardhatBlockchain implements HardhatBlockchainInterface {
   }
 
   public addEmptyBlockRange(r: EmptyBlockRange) {
+    if (!r.first.eqn(this._length)) {
+      throw new Error(
+        `Invalid range start of ${r.first}. Expected ${this._length}.`
+      );
+    }
     this._data.addEmptyBlockRange(r);
+    this._length += r.last.subn(this._length).addn(1).toNumber();
   }
 
   public async putBlock(block: Block): Promise<void> {
@@ -133,7 +140,9 @@ export class HardhatBlockchain implements HardhatBlockchainInterface {
     const parent = this._data.getBlockByNumber(new BN(blockNumber - 1));
 
     if (this._length !== blockNumber) {
-      throw new Error("Invalid block number");
+      throw new Error(
+        `Invalid block number ${blockNumber}. Expected ${this._length}.`
+      );
     }
     if (
       (blockNumber === 0 && !parentHash.equals(zeros(32))) ||

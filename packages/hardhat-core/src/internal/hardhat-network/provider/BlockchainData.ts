@@ -14,17 +14,14 @@ export class BlockchainData {
   private _transactions: Map<string, TypedTransaction> = new Map();
   private _transactionReceipts: Map<string, RpcReceiptOutput> = new Map();
   private _totalDifficulty: Map<string, BN> = new Map();
-  private _emptyBlockRanges: EmptyBlockRange[] = new Array();
+  public emptyBlockRanges: EmptyBlockRange[] = new Array();
 
   public addEmptyBlockRange(r: EmptyBlockRange) {
-    this._emptyBlockRanges.push(r);
+    this.emptyBlockRanges.push(r);
   }
 
   public getBlockByNumber(blockNumber: BN) {
-    // TODO: if blockNumber lies within any of empty block ranges
-    // (this._emptyBlockRanges) then construct the requested block, pass it
-    // into this.addBlock, and split that range into two different ranges above
-    // and below the newly-constructed block.
+    this._createBlockIfInEmptyRange(blockNumber);
     return this._blocksByNumber.get(blockNumber.toNumber());
   }
 
@@ -118,5 +115,62 @@ export class BlockchainData {
 
   public addTransactionReceipt(receipt: RpcReceiptOutput) {
     this._transactionReceipts.set(receipt.transactionHash, receipt);
+  }
+
+  private _createBlockIfInEmptyRange(blockNumber: BN) {
+    // if blockNumber lies within one of the ranges listed in
+    // this.emptyBlockRanges, then that block needs to be created, and that
+    // range needs to be split in two in order to accomodate the accessing of
+    // the given block.
+
+    // determine whether any empty block ranges contain the block number.
+    const rangeIndex = this.emptyBlockRanges.findIndex(
+      (range) => range.first.lte(blockNumber) && range.last.gte(blockNumber)
+    );
+    if (rangeIndex !== -1) {
+      // the block number lies within the identified empty block range
+
+      // split the empty block range:
+
+      const oldRange = this.emptyBlockRanges[rangeIndex];
+
+      this.emptyBlockRanges.splice(rangeIndex, 1);
+
+      if (!blockNumber.eq(oldRange.first)) {
+        this.emptyBlockRanges.push({
+          first: oldRange.first,
+          last: blockNumber.subn(1),
+          intervalInSeconds: oldRange.intervalInSeconds,
+        });
+      }
+
+      if (!blockNumber.eq(oldRange.last)) {
+        this.emptyBlockRanges.push({
+          first: blockNumber.addn(1),
+          last: oldRange.last,
+          intervalInSeconds: oldRange.intervalInSeconds,
+        });
+      }
+
+      // create the block:
+
+      const previousTimestamp =
+        this.getBlockByNumber(oldRange.first.subn(1))?.header.timestamp ??
+        new BN(0);
+
+      this.addBlock(
+        Block.fromBlockData({
+          header: {
+            number: blockNumber,
+            timestamp: previousTimestamp.add(
+              oldRange.intervalInSeconds.mul(
+                blockNumber.sub(oldRange.first).addn(1)
+              )
+            ),
+          },
+        }),
+        new BN(0)
+      );
+    }
   }
 }
